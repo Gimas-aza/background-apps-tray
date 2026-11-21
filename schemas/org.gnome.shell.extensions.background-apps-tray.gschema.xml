@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.background-apps-tray" path="/org/gnome/shell/extensions/background-apps-tray/">
+    <key name="pinned-apps" type="as">
+      <default>[]</default>
+      <summary>Applications pinned to the top bar</summary>
+    </key>
+    <key name="icon-size" type="i">
+      <default>0</default>
+      <summary>Use the theme icon size</summary>
+    </key>
+    <key name="custom-icons" type="a(sss)">
+      <default>[]</default>
+      <summary>AppIndicator icon overrides</summary>
+    </key>
+    <key name="compact-mode-enabled" type="b">
+      <default>true</default>
+      <summary>Use compact AppIndicator icons</summary>
+    </key>
+  </schema>
+</schemalist>

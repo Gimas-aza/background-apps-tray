@@ -1,0 +1,32 @@
+.background-apps-tray-scroll {
+  max-height: 340px;
+}
+
+.background-apps-tray-row,
+.background-apps-tray-detail-header,
+.background-apps-tray-app {
+  spacing: 8px;
+}
+
+.background-apps-tray-name {
+  font-weight: bold;
+}
+
+.background-apps-tray-message {
+  font-size: 0.85em;
+}
+
+.background-apps-tray-control {
+  padding: 6px;
+  min-width: 16px;
+  min-height: 16px;
+}
+
+.background-apps-tray-control:checked {
+  border: 1px solid rgba(128, 128, 128, 0.8);
+  padding: 5px;
+}
+
+.background-apps-tray-control:insensitive {
+  opacity: 0.4;
+}
