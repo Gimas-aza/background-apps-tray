@@ -23,9 +23,6 @@ msgstr[2] "%d фоновых приложений"
 msgid "No Background Apps"
 msgstr "Нет фоновых приложений"
 
-msgid "Background and tray applications"
-msgstr "Фоновые приложения и приложения из трея"
-
 msgid "Tray menu"
 msgstr "Меню трея"
 
@@ -64,3 +61,30 @@ msgstr "Не удалось завершить приложение"
 
 msgid "Could not open the tray menu"
 msgstr "Не удалось открыть меню трея"
+
+msgid "Tray Icons"
+msgstr "Значки трея"
+
+msgid "Make all pinned icons monochrome"
+msgstr "Сделать все закреплённые значки монохромными"
+
+msgid "Pinned Applications"
+msgstr "Закреплённые приложения"
+
+msgid "Pin an application to the top bar to customize its icon."
+msgstr "Закрепите приложение на верхней панели, чтобы настроить его значок."
+
+msgid "Monochrome"
+msgstr "Монохромный"
+
+msgid "Choose Icon…"
+msgstr "Выбрать значок…"
+
+msgid "Restore Default Icon"
+msgstr "Восстановить стандартный значок"
+
+msgid "Images"
+msgstr "Изображения"
+
+msgid "Could not open the image file"
+msgstr "Не удалось открыть файл изображения"

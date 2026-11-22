@@ -95,9 +95,32 @@ function createAppIcon(entry, size, gicon = null) {
     if (!gicon && indicator)
         return new IconActor(indicator, size);
 
-    gicon ??= entry.app?.get_icon() ??
-        new Gio.ThemedIcon({name: 'application-x-executable-symbolic'});
+    gicon ??= entry.app?.get_icon();
+    const legacy = entry.legacy[0]?.icon;
+    if (!gicon && legacy) {
+        const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
+        legacy.set_size(16 * scale, 16 * scale);
+        return new Clutter.Clone({source: legacy, width: size * scale, height: size * scale,
+            x_align: Clutter.ActorAlign.CENTER, y_align: Clutter.ActorAlign.CENTER});
+    }
+    gicon ??= new Gio.ThemedIcon({name: 'application-x-executable-symbolic'});
     return new St.Icon({gicon, icon_size: size, y_align: Clutter.ActorAlign.CENTER});
+}
+
+function createPanelIcon(entry) {
+    const gicon = entry.iconPath ? new Gio.FileIcon({file: Gio.File.new_for_path(entry.iconPath)}) : null;
+    const icon = createAppIcon(entry, 16, gicon);
+    if (icon instanceof St.Widget)
+        icon.add_style_class_name('system-status-icon');
+    return icon;
+}
+
+function setIconMonochrome(icon, enabled) {
+    const effect = icon.get_effect('background-apps-tray-monochrome');
+    if (effect)
+        effect.enabled = enabled;
+    else if (enabled)
+        icon.add_effect_with_name('background-apps-tray-monochrome', new Clutter.DesaturateEffect({factor: 1}));
 }
 
 function isKeyboardEvent(event) {
@@ -531,8 +554,6 @@ export class BackgroundMenu {
         const separator = items[items.indexOf(this._settingsAction) - 1];
         this._settingsSeparator = separator instanceof PopupMenu.PopupSeparatorMenuItem
             ? separator : null;
-        this._originalSubtitle = toggle._listTitle.label.text;
-        toggle._listTitle.label.text = t('Background and tray applications');
         this._section.removeAll();
         this._section.addMenuItem(this._list);
         this._openId = toggle.menu.connect('open-state-changed', (_menu, open) => {
@@ -654,7 +675,6 @@ export class BackgroundMenu {
         this._showList();
         this._list.destroy();
         this._rows.clear();
-        this._toggle._listTitle.label.text = this._originalSubtitle;
     }
 }
 
@@ -681,7 +701,16 @@ export class PanelPins {
             const entry = entries.get(key);
             if (!this._buttons.has(key))
                 this._buttons.set(key, this._add(entry));
-            this._buttons.get(key).button.accessible_name = entry.name;
+            const current = this._buttons.get(key);
+            if (current.iconPath !== entry.iconPath) {
+                const icon = createPanelIcon(entry);
+                current.button.replace_child(current.icon, icon);
+                current.icon.destroy();
+                current.icon = icon;
+                current.iconPath = entry.iconPath;
+            }
+            setIconMonochrome(current.icon, entry.monochromeIcon);
+            current.button.accessible_name = entry.name;
         }
     }
 
@@ -689,18 +718,8 @@ export class PanelPins {
         const menus = trayMenus(entry);
         const hasPopup = menus.length > 1 || menus.some(menu => !isExternalMenu(menu));
         const button = new PanelMenu.Button(0.5, entry.name, !hasPopup);
-        // Legacy X11 visuals can include an opaque background supplied by the tray host.
-        const legacy = entry.indicators.length || entry.app?.get_icon() ? null : entry.legacy[0]?.icon;
-        if (legacy) {
-            const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
-            const size = 16 * scale;
-            legacy.set_size(size, size);
-            button.add_child(new Clutter.Clone({source: legacy, width: size, height: size}));
-        } else {
-            const icon = createAppIcon(entry, 16);
-            icon.add_style_class_name('system-status-icon');
-            button.add_child(icon);
-        }
+        const icon = createPanelIcon(entry);
+        button.add_child(icon);
 
         if (hasPopup) {
             const section = new PopupMenu.PopupMenuSection();
@@ -744,7 +763,7 @@ export class PanelPins {
         Main.panel.addToStatusArea(`background-apps-tray-${++this._serial}`, button, 0, 'right');
         const remove = () => button.destroy();
         const primary = entry.indicators[0]?.indicator ?? entry.legacy[0]?.icon;
-        return {button, app: entry.app, primary, menus, remove};
+        return {button, icon, iconPath: entry.iconPath, app: entry.app, primary, menus, remove};
     }
 
     destroy() {

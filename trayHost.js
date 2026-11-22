@@ -8,6 +8,7 @@ import {SNIStatus} from './vendor/appIndicator.js';
 import {getProcessId} from './vendor/dbusUtils.js';
 import {StatusNotifierWatcher, WATCHER_BUS_NAME} from './vendor/statusNotifierWatcher.js';
 import {processExecutable, processIdentity} from './processActions.js';
+import {wineTrayPrograms} from './wineApps.js';
 
 export class TrayHost {
     constructor(extension, cancellable, onChanged) {
@@ -41,7 +42,8 @@ export class TrayHost {
                 this._tray.connect('tray-icon-added', (_manager, icon) => {
                     icon.opacity = 0;
                     Main.uiGroup.add_child(icon);
-                    this.legacy.set(icon, processIdentity(icon.pid));
+                const process = processIdentity(icon.pid);
+                this.legacy.set(icon, {process, wine: wineTrayPrograms(icon.pid, icon.wm_class, process)});
                     this._onChanged();
                 });
                 this._tray.connect('tray-icon-removed', (_manager, icon) => {

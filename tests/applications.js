@@ -2,9 +2,10 @@
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 
-import {collectApplications, resolvePins, sameTrayMenus, trayMenus} from '../applications.js';
+import {applyPinnedIconSettings, collectApplications, resolvePins, sameTrayMenus, trayMenus} from '../applications.js';
 import {DesktopUnits, lookupDesktopApp, lookupUnitApp} from '../desktopUnits.js';
 import {canClose, closeApplication} from '../processActions.js';
+import {wineTrayPrograms} from '../wineApps.js';
 
 function assert(condition, message) {
     if (!condition)
@@ -27,6 +28,7 @@ const happ = desktopApp('Happ.desktop');
 const appSystem = {
     lookup_app: id => [happ, telegram].find(app => app.get_id() === id) ?? null,
     lookup_startup_wmclass: id => id === 'TelegramDesktop' ? telegram : null,
+    lookup_desktop_wmclass: () => null,
     get_installed: () => [happ, telegram].map(app => app.get_app_info()),
     get_running: () => windows.length ? [happ] : [],
 };
@@ -58,6 +60,21 @@ assert(canClose(entry) && trayMenus(entry)[0].path === '/MenuBar', 'Menu and qui
 const pins = resolvePins(entries, ['sni:TelegramDesktop', 'desktop:org.telegram.desktop', 'sni:offline']);
 assert(pins.join() === [entry.key, 'sni:offline'].join(), 'Merge old pins and retain offline pins');
 
+const iconPath = Gio.File.new_for_uri(import.meta.url).get_parent().get_parent()
+    .resolve_relative_path('icons/tray-pin-symbolic.svg').get_path();
+const otherTrayApp = {key: 'xembed:other', name: 'Other', aliases: [], inBackground: true};
+const unpinned = {key: 'xembed:unpinned', name: 'Unpinned', aliases: [], inBackground: true};
+const iconEntries = new Map([...entries, [otherTrayApp.key, otherTrayApp], [unpinned.key, unpinned]]);
+const iconPins = [...pins, otherTrayApp.key];
+const savedIcons = {'sni:TelegramDesktop': ['Telegram', iconPath, true]};
+const availableIcons = applyPinnedIconSettings(iconEntries, iconPins, savedIcons, false);
+assert(availableIcons.length === 2 && availableIcons[0][0] === 'sni:TelegramDesktop' && entry.iconPath === iconPath &&
+    entry.monochromeIcon && !otherTrayApp.monochromeIcon, 'Apply the replacement and monochrome mode to the selected app');
+const missingIcon = {...savedIcons, [entry.key]: ['Telegram', `${iconPath}.missing`, false]};
+applyPinnedIconSettings(iconEntries, iconPins, missingIcon, true);
+assert(!entry.iconPath && entry.monochromeIcon && otherTrayApp.monochromeIcon && !unpinned.monochromeIcon,
+    'Use the default icon if the file is missing and apply global monochrome to all pinned apps');
+
 const happUnit = 'app-gnome-Happ-21452.scope';
 const desktopUnits = new DesktopUnits(appSystem, new Gio.Cancellable(), () => {});
 const happSources = {...sources, units: desktopUnits};
@@ -67,11 +84,37 @@ const listed = () => collectApplications(happSources).get(key).inBackground;
 const process = Gio.Subprocess.new(['cat'], Gio.SubprocessFlags.STDIN_PIPE);
 const pid = Number(process.get_identifier());
 const readFile = GLib.file_get_contents;
+const readLink = GLib.file_read_link;
+const prefix = '/games/Test Bottle';
+const windowsPath = 'C:\\Program Files\\Epic Games\\EpicGamesLauncher.exe';
+const epicPath = `${prefix}/drive_c/Program Files/Epic Games/EpicGamesLauncher.exe`;
+const sandboxPid = 21452;
 // The child is real. Its desktop cgroup is simulated so the test also runs outside systemd.
-GLib.file_get_contents = path => path === `/proc/${pid}/cgroup`
-    ? [true, new TextEncoder().encode(`0::/app.slice/${happUnit}\n`)] : readFile(path);
+GLib.file_get_contents = path => {
+    const encoder = new TextEncoder();
+    if (path === `/proc/${pid}/cgroup`)
+        return [true, encoder.encode(`0::/app.slice/${happUnit}\n`)];
+    if (path === `/proc/${pid}/status`)
+        return [true, encoder.encode(`NSpid:\t${pid}\t${sandboxPid}\n`)];
+    if (path === `/proc/${pid}/cmdline`)
+        return [true, encoder.encode(`${windowsPath}\0`)];
+    if (path === `/proc/${pid}/environ`)
+        return [true, encoder.encode(`WINEPREFIX=${prefix}\0`)];
+    return readFile(path);
+};
+GLib.file_read_link = path => {
+    if (path === `/proc/${pid}/exe`)
+        return '/usr/bin/wine64-preloader';
+    if (path === `/proc/${pid}/ns/pid`)
+        return 'pid:[1234]';
+    return readLink(path);
+};
 let fallback;
 try {
+    for (const reportedPid of [sandboxPid, pid]) {
+        assert(wineTrayPrograms(reportedPid, 'steam_proton')?.[0]?.program === epicPath,
+            'Resolve both sandbox and host PIDs to the exact Windows executable');
+    }
     poll();
     assert(!listed(), 'A new launch scope alone never creates a background row');
     const window = {minimized: false, is_skip_taskbar: () => false, get_pid: () => pid};
@@ -112,6 +155,7 @@ try {
     assert(!listed(), 'An exited window process stays out even if its scope still has helpers');
 } finally {
     GLib.file_get_contents = readFile;
+    GLib.file_read_link = readLink;
     process.get_stdin_pipe().close(null);
     desktopUnits.destroy();
 }
@@ -140,6 +184,54 @@ const legacyIcon = {pid: 0, wm_class: 'Happ'};
 const menus = trayMenus({...resolved, indicators: [], legacy: [{icon: legacyIcon}]});
 assert(menus.length === 1 && menus[0].type === 'xembed' && !sameTrayMenus(fallback, menus),
     'A real tray menu replaces the fallback');
+
+const launcherInfo = (id, name, command) => ({
+    get_id: () => id,
+    get_name: () => name,
+    get_commandline: () => command,
+});
+const epic = desktopApp('Epic Games Launcher.desktop');
+const wineIcon = {pid: 827, wm_class: 'steam_proton'};
+const wineIdentity = {pid: wineIcon.pid, started: '1'};
+const other = launcherInfo('other.desktop', 'Other', 'wine /other/Game.exe');
+const wineSources = (installed, wine) => ({...sources,
+    appSystem: {...appSystem, lookup_app: id => id === epic.get_id() ? epic : appSystem.lookup_app(id),
+        get_installed: () => [...installed, other]},
+    tracker: {get_app_from_pid: () => happ},
+    tray: {...sources.tray, legacy: new Map([[wineIcon, {process: wineIdentity, wine}]])},
+});
+const wineProgram = {command: windowsPath, prefix, ids: [], program: epicPath};
+const cases = [
+    ['PortProton', `flatpak run ru.linux_gaming.PortProton ${GLib.shell_quote(epicPath)}`, wineProgram],
+    ['Wine', `env WINEPREFIX=${GLib.shell_quote(prefix)} wine ${GLib.shell_quote(windowsPath)}`, wineProgram],
+    ['Custom runner', `my-runner --launch ${GLib.shell_quote(epicPath)}`, wineProgram],
+    ['Steam', 'steam steam://rungameid/1234567890123456789', {...wineProgram, ids: ['1234567890123456789']}],
+    ['Steam -applaunch', 'flatpak run com.valvesoftware.Steam -applaunch 42', {...wineProgram, ids: ['42']}],
+    ['Lutris', 'flatpak run net.lutris.Lutris lutris:rungameid/42', {...wineProgram, lutrisName: 'Epic'}],
+    ['Bottles', "flatpak run --command=bottles-cli com.usebottles.bottles run -p 'Epic Games Launcher' -b 'Test Bottle'",
+        wineProgram],
+];
+for (const [runner, command, wine] of cases) {
+    const entries = collectApplications(wineSources([launcherInfo(epic.get_id(), 'Epic', command)], [wine]));
+    const [wineEntry] = entries.values();
+    assert(wineEntry.app === epic && trayMenus(wineEntry)[0].icon === wineIcon && !canClose(wineEntry) &&
+        resolvePins(entries, ['xembed:steam_proton'])[0] === wineEntry.key,
+        `${runner} uses the launcher without treating an ambiguous PID or Wine Explorer as a quit target`);
+}
+const epicLauncher = launcherInfo(epic.get_id(), 'Epic', `wine ${GLib.shell_quote(epicPath)}`);
+const directWine = {...wineSources([epicLauncher], [{...wineProgram, pid: wineIcon.pid}]),
+    tracker: {get_app_from_pid: () => epic}};
+assert(canClose(visible(directWine)[0]), 'An independently verified Wine host process keeps its quit action');
+const duplicate = launcherInfo('duplicate.desktop', 'Duplicate', `wine ${GLib.shell_quote(epicPath)}`);
+for (const input of [wineSources([epicLauncher, duplicate], [wineProgram]),
+    wineSources([epicLauncher], [wineProgram, {...wineProgram, program: '/other/Game.exe'}]),
+    wineSources([epicLauncher], [])]) {
+    assert(!visible(input)[0]?.app, 'Ambiguous Wine metadata leaves the tray entry independent');
+}
+
+const nativeSources = {...sources, tray: {...sources.tray,
+    legacy: new Map([[{pid: 0, wm_class: 'TelegramDesktop'}, {process: null, wine: null}]])}};
+assert(visible(nativeSources)[0]?.app === telegram, 'Native XEmbed icons still match their desktop class');
 
 const name = 'org.example.TrayTest';
 const nativeInfo = {

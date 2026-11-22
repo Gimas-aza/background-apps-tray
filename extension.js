@@ -6,11 +6,12 @@ import Shell from 'gi://Shell';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-import {collectApplications, resolvePins} from './applications.js';
+import {applyPinnedIconSettings, collectApplications, resolvePins} from './applications.js';
 import {DesktopUnits} from './desktopUnits.js';
 import {BackgroundMenu, clearLegacyMenu, PanelPins} from './menuView.js';
 import {canClose, closeApplication} from './processActions.js';
 import {TrayHost} from './trayHost.js';
+import {APP_ICONS_KEY, MONOCHROME_KEY, TRAY_APPS_PATH, TRAY_APPS_TYPE, TRAY_APPS_XML} from './trayIconSettings.js';
 import * as Interfaces from './vendor/interfaces.js';
 import {Logger} from './vendor/logger.js';
 import {SettingsManager} from './vendor/settingsManager.js';
@@ -28,6 +29,7 @@ class BackgroundAppsController {
         this._refreshId = 0;
         this._connections = [];
         this._entries = new Map();
+        this._availableApps = new GLib.Variant(TRAY_APPS_TYPE, []);
         this._busy = new Set();
         this._count = 0;
     }
@@ -46,6 +48,8 @@ class BackgroundAppsController {
         this._panelPins = new PanelPins(t, actions);
         this._units = new DesktopUnits(this._appSystem, this._cancellable, () => this._queueRefresh());
         this._tray = new TrayHost(extension, this._cancellable, () => this._queueRefresh());
+        this._appsObject = Gio.DBusExportedObject.wrapJSObject(TRAY_APPS_XML, this);
+        this._appsObject.export(Gio.DBus.session, TRAY_APPS_PATH);
 
         this._originalSync = toggle._sync;
         this._originalVisibility = toggle._syncVisibility;
@@ -58,7 +62,8 @@ class BackgroundAppsController {
             this._units.trackWindows();
             this._queueRefresh();
         };
-        this._connect(this._settings, `changed::${PIN_KEY}`, () => this._queueRefresh());
+        for (const key of [PIN_KEY, APP_ICONS_KEY, MONOCHROME_KEY])
+            this._connect(this._settings, `changed::${key}`, () => this._queueRefresh());
         this._connect(this._appSystem, 'app-state-changed', windowsChanged);
         this._connect(this._appSystem, 'installed-changed', () => this._queueRefresh());
         this._connect(this._tracker, 'tracked-windows-changed', windowsChanged);
@@ -100,6 +105,9 @@ class BackgroundAppsController {
         const pins = resolvePins(this._entries, savedPins);
         if (pins.length !== savedPins.length || pins.some((pin, i) => pin !== savedPins[i]))
             this._settings.set_strv(PIN_KEY, pins);
+        const apps = applyPinnedIconSettings(this._entries, pins,
+            this._settings.get_value(APP_ICONS_KEY).deep_unpack(), this._settings.get_boolean(MONOCHROME_KEY));
+        this._publishApps(apps.sort(([a], [b]) => a.localeCompare(b)));
         this._count = this._menu.update(this._entries, pins, this._busy, this._tray.conflict);
         this._panelPins.update(this._entries, pins);
 
@@ -108,6 +116,18 @@ class BackgroundAppsController {
                 .replace('%d', String(this._count))
             : this._extension.gettext('No Background Apps');
         this._syncVisibility();
+    }
+
+    get Applications() {
+        return this._availableApps.deep_unpack();
+    }
+
+    _publishApps(apps) {
+        const list = new GLib.Variant(TRAY_APPS_TYPE, apps);
+        if (!list.equal(this._availableApps)) {
+            this._availableApps = list;
+            this._appsObject.emit_property_changed('Applications', list);
+        }
     }
 
     _syncVisibility() {
@@ -159,6 +179,9 @@ class BackgroundAppsController {
         for (const [object, id] of this._connections)
             object.disconnect(id);
 
+        this._publishApps([]);
+        this._appsObject?.unexport();
+        this._appsObject = null;
         this._menu?.destroy();
         this._panelPins?.destroy();
         this._tray?.destroy();

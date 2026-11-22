@@ -5,6 +5,15 @@
       <default>[]</default>
       <summary>Applications pinned to the top bar</summary>
     </key>
+    <key name="monochrome-icons" type="b">
+      <default>false</default>
+      <summary>Make all pinned tray icons monochrome</summary>
+    </key>
+    <key name="tray-app-icons" type="a{s(ssb)}">
+      <default>{}</default>
+      <summary>Pinned tray icon settings by application ID</summary>
+      <description>Each entry stores the application name, the icon file path, and whether to make its icon monochrome.</description>
+    </key>
     <key name="icon-size" type="i">
       <default>0</default>
       <summary>Use the theme icon size</summary>

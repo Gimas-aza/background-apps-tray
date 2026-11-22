@@ -3,6 +3,7 @@ import GLib from 'gi://GLib';
 
 import {lookupDesktopApp, lookupUnitApp} from './desktopUnits.js';
 import {canClose, processAppUnits, processExecutable} from './processActions.js';
+import {wineDesktopApp} from './wineApps.js';
 
 function cleanText(value) {
     return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : '';
@@ -127,17 +128,20 @@ export function collectApplications({
         entry.inBackground = true;
     }
 
-    for (const [icon, identity] of tray.legacy) {
-        const processApp = trackedAppForPid(tracker, icon.pid) ?? unitAppForPid(appSystem, icon.pid);
-        const app = (icon.wm_class && (
-            appSystem.lookup_startup_wmclass(icon.wm_class) ??
-            appSystem.lookup_desktop_wmclass(icon.wm_class))) || processApp;
+    for (const [icon, {process: identity, wine}] of tray.legacy) {
+        const usePid = !wine || (identity && wine.some(item => item.pid === identity.pid && item.program));
+        const processApp = usePid
+            ? trackedAppForPid(tracker, icon.pid) ?? unitAppForPid(appSystem, icon.pid)
+            : null;
+        const app = wine
+            ? wineDesktopApp(appSystem, icon, wine)
+            : (icon.wm_class && (appSystem.lookup_startup_wmclass(icon.wm_class) ??
+                appSystem.lookup_desktop_wmclass(icon.wm_class))) || processApp;
+        const process = identity && usePid && legacyMatchesProcess(icon, app, processApp) ? identity : null;
         const alias = `xembed:${icon.wm_class || icon.title || 'tray-icon'}`;
         const key = app ? `desktop:${app.get_id()}` : alias;
         const entry = ensureEntry(key, icon.title || icon.wm_class, app);
         entry.aliases.push(alias);
-        const process = legacyMatchesProcess(icon, app, processApp)
-            ? identity : null;
         entry.legacy.push({icon, process});
         entry.inBackground = true;
     }
@@ -145,13 +149,39 @@ export function collectApplications({
     return entries;
 }
 
+function resolveAppKey(entries, key) {
+    if (entries.has(key))
+        return key;
+    const matches = [...entries.values()].filter(entry => entry.aliases.includes(key));
+    return matches.length === 1 ? matches[0].key : key;
+}
+
 export function resolvePins(entries, pins) {
-    return [...new Set(pins.map(pin => {
-        if (entries.has(pin))
-            return pin;
-        const matches = [...entries.values()].filter(entry => entry.aliases.includes(pin));
-        return matches.length === 1 ? matches[0].key : pin;
-    }))];
+    return [...new Set(pins.map(pin => resolveAppKey(entries, pin)))];
+}
+
+export function applyPinnedIconSettings(entries, pins, savedIcons, monochrome) {
+    const iconKeys = new Map();
+    for (const key of Object.keys(savedIcons)) {
+        const appKey = resolveAppKey(entries, key);
+        if (appKey === key || !iconKeys.has(appKey))
+            iconKeys.set(appKey, key);
+    }
+
+    const apps = [];
+    for (const pin of pins) {
+        const entry = entries.get(pin);
+        if (!entry)
+            continue;
+
+        const key = iconKeys.get(pin) ?? pin;
+        const [, path = '', selected = false] = savedIcons[key] ?? [];
+        entry.iconPath = GLib.path_is_absolute(path) && GLib.file_test(path, GLib.FileTest.IS_REGULAR)
+            ? path : '';
+        entry.monochromeIcon = monochrome || selected;
+        apps.push([key, entry.name]);
+    }
+    return apps;
 }
 
 export function trayMenus(entry) {
