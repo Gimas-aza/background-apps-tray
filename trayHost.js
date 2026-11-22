@@ -71,7 +71,7 @@ export class TrayHost {
         if (this._destroyed)
             return;
 
-        const record = {indicator, owner: null, pid: null, process: null};
+        const record = {indicator, requestedOwner: null, owner: null, pid: null, process: null, executable: ''};
         this.indicators.set(indicator, record);
         const refreshOwner = () => this._refreshOwner(record);
         for (const signal of ['ready', 'name-owner-changed', 'reset'])
@@ -90,31 +90,34 @@ export class TrayHost {
         refreshOwner();
     }
 
-    _refreshOwner(record) {
+    async _refreshOwner(record) {
         const {indicator} = record;
         const owner = indicator.owner;
         this._onChanged();
-        if (record.owner === owner)
+        if (record.requestedOwner === owner)
             return;
 
-        record.owner = owner;
-        record.pid = null;
-        record.process = null;
+        record.requestedOwner = owner;
+        record.owner = null;
         if (!owner)
             return;
 
-        getProcessId(owner, this._cancellable).then(pid => {
-            if (this.indicators.has(indicator) && indicator.owner === owner) {
-                record.pid = pid;
-                // The bus can report the Flatpak proxy instead of the actual app.
-                if (processExecutable(pid) !== 'xdg-dbus-proxy')
-                    record.process = processIdentity(pid);
-                this._onChanged();
-            }
-        }).catch(error => {
+        let pid = null;
+        try {
+            pid = await getProcessId(owner, this._cancellable);
+        } catch (error) {
             if (this.indicators.has(indicator) && !this._cancellable.is_cancelled())
                 console.debug(`Background Apps Tray: ${error.message}`);
-        });
+        }
+        if (!this.indicators.has(indicator) || indicator.owner !== owner || this._cancellable.is_cancelled())
+            return;
+
+        record.owner = owner;
+        record.pid = pid;
+        record.executable = pid ? processExecutable(pid) : '';
+        // The bus can report the Flatpak proxy instead of the actual app.
+        record.process = pid && record.executable !== 'xdg-dbus-proxy' ? processIdentity(pid) : null;
+        this._onChanged();
     }
 
     _stopHosting() {

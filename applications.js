@@ -12,13 +12,14 @@ function variantValue(value) {
     return value?.deep_unpack?.() ?? value;
 }
 
-function appForProcess(appSystem, tracker, pid) {
+function trackedAppForPid(tracker, pid) {
+    const tracked = pid ? tracker.get_app_from_pid(pid) : null;
+    return tracked?.get_app_info() ? tracked : null;
+}
+
+function unitAppForPid(appSystem, pid) {
     if (!pid)
         return null;
-
-    const tracked = tracker.get_app_from_pid(pid);
-    if (tracked?.get_app_info())
-        return tracked;
 
     for (const unit of processAppUnits(pid)) {
         const app = lookupUnitApp(appSystem, unit);
@@ -28,8 +29,17 @@ function appForProcess(appSystem, tracker, pid) {
     return null;
 }
 
-function hasVisibleWindow(app) {
-    return app.get_windows().some(window => !window.minimized && !window.is_skip_taskbar());
+function appForExecutable(appSystem, entries, executable) {
+    if (!executable || !entries.size)
+        return null;
+
+    const name = executable.toLowerCase();
+    const matches = appSystem.get_installed().filter(info => {
+        const command = info.get_executable();
+        return command && GLib.path_get_basename(command).toLowerCase() === name;
+    });
+    // Shared runtimes can have their own scope. Require a single launcher and independent app evidence.
+    return matches.length === 1 ? entries.get(`desktop:${matches[0].get_id()}`)?.app : null;
 }
 
 function legacyMatchesProcess(icon, app, processApp) {
@@ -46,7 +56,7 @@ function legacyMatchesProcess(icon, app, processApp) {
 }
 
 export function collectApplications({
-    appSystem, tracker, monitorApps, tray, units, pins, unknownName, previousEntries,
+    appSystem, tracker, monitorApps, tray, units, pins, unknownName,
 }) {
     const entries = new Map();
     const pinKeys = new Set(pins);
@@ -81,34 +91,44 @@ export function collectApplications({
             continue;
         const key = `desktop:${app.get_id()}`;
         const entry = ensureEntry(key, null, app);
-        const previous = previousEntries?.get(key);
         entry.units.push(unit);
-        entry.inBackground ||= pinKeys.has(key) || !hasVisibleWindow(app) ||
-            !!(previous?.inBackground && previous.units.includes(unit));
+        entry.inBackground ||= pinKeys.has(key) || units.background.get(unit) === app.get_id();
+    }
+
+    for (const app of appSystem.get_running()) {
+        if (!app.get_app_info())
+            continue;
+
+        const key = `desktop:${app.get_id()}`;
+        if (pinKeys.has(key))
+            ensureEntry(key, null, app).inBackground = true;
     }
 
     for (const record of tray.indicators.values()) {
-        const {indicator, pid, process} = record;
-        if (!indicator.isReady || !indicator.hasNameOwner)
+        const {indicator, owner, pid, process, executable} = record;
+        if (!indicator.isReady || !indicator.hasNameOwner || owner !== indicator.owner ||
+            indicator.status === 'Passive')
             continue;
 
-        const app = appForProcess(appSystem, tracker, pid) ??
+        const app = trackedAppForPid(tracker, pid) ??
             lookupDesktopApp(appSystem, indicator.id) ??
             lookupDesktopApp(appSystem, indicator.busName) ??
-            appSystem.lookup_startup_wmclass(indicator.id);
+            appSystem.lookup_startup_wmclass(indicator.id) ??
+            appForExecutable(appSystem, entries, executable) ??
+            unitAppForPid(appSystem, pid);
         const alias = `sni:${indicator.id}`;
         const key = app ? `desktop:${app.get_id()}` : alias;
         const entry = ensureEntry(key, indicator.title || indicator.id, app);
         entry.aliases.push(alias);
         entry.indicators.push({
-            indicator, process, owner: indicator.owner, path: indicator.menuPath,
+            indicator, process, owner, path: indicator.menuPath,
             contextMenu: indicator.supportsContextMenu !== false,
         });
         entry.inBackground = true;
     }
 
     for (const [icon, identity] of tray.legacy) {
-        const processApp = appForProcess(appSystem, tracker, icon.pid);
+        const processApp = trackedAppForPid(tracker, icon.pid) ?? unitAppForPid(appSystem, icon.pid);
         const app = (icon.wm_class && (
             appSystem.lookup_startup_wmclass(icon.wm_class) ??
             appSystem.lookup_desktop_wmclass(icon.wm_class))) || processApp;
@@ -120,15 +140,6 @@ export function collectApplications({
             ? identity : null;
         entry.legacy.push({icon, process});
         entry.inBackground = true;
-    }
-
-    for (const app of appSystem.get_running()) {
-        if (!app.get_app_info())
-            continue;
-
-        const key = `desktop:${app.get_id()}`;
-        if (pinKeys.has(key))
-            ensureEntry(key, null, app).inBackground = true;
     }
 
     return entries;

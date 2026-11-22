@@ -5,5 +5,5 @@
   "shell-version": ["45", "46", "47", "48", "49", "50", "51"],
   "settings-schema": "org.gnome.shell.extensions.background-apps-tray",
   "gettext-domain": "background-apps-tray",
-  "version": 4
+  "version": 6
 }

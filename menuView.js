@@ -17,8 +17,10 @@ import {sameTrayMenus, trayMenus} from './applications.js';
 import {canClose, processAppUnits} from './processActions.js';
 
 const MENU_ICON = 'view-list-symbolic';
-const PIN_ICON = 'view-pin-symbolic';
-const CLOSE_ICON = 'process-stop-symbolic';
+const CLOSE_ICON = 'window-close-symbolic';
+const icons = Gio.File.new_for_uri(import.meta.url).get_parent().get_child('icons');
+const LIST_CONTROL_ICON = new Gio.FileIcon({file: icons.get_child('tray-list-symbolic.svg')});
+const PIN_CONTROL_ICON = new Gio.FileIcon({file: icons.get_child('tray-pin-symbolic.svg')});
 
 function label(text, styleClass) {
     const actor = new St.Label({text, style_class: styleClass,
@@ -27,10 +29,13 @@ function label(text, styleClass) {
     return actor;
 }
 
-function iconButton(iconName, name, activate, secondary = false) {
+function iconButton(icon, name, activate, secondary = false) {
     const button = new St.Button({
         style_class: 'icon-button background-apps-tray-control',
-        child: new St.Icon({icon_name: iconName, icon_size: 16}),
+        child: new St.Icon({
+            gicon: typeof icon === 'string' ? new Gio.ThemedIcon({name: icon}) : icon,
+            icon_size: 16,
+        }),
         can_focus: true,
         track_hover: true,
         accessible_name: name,
@@ -106,6 +111,7 @@ const ApplicationRow = GObject.registerClass({
     _init(entry, pinned, busy, actions, t) {
         super._init({activate: false, can_focus: false});
         this.add_style_class_name('background-apps-tray-row');
+        this.add_style_class_name('background-app-item');
         this.remove_style_class_name('popup-inactive-menu-item');
         this._t = t;
         this._icon = new St.Bin({y_align: Clutter.ActorAlign.CENTER});
@@ -138,9 +144,9 @@ const ApplicationRow = GObject.registerClass({
         });
         this.add_child(this._openButton);
 
-        this.menuButton = iconButton(MENU_ICON, t('Tray menu'),
+        this.menuButton = iconButton(LIST_CONTROL_ICON, t('Tray menu'),
             event => actions.menu(this._entry, event, this.menuButton), true);
-        this._pinButton = iconButton(PIN_ICON, t('Pin to Top Bar'),
+        this._pinButton = iconButton(PIN_CONTROL_ICON, t('Pin to Top Bar'),
             () => actions.pin(this._entry.key));
         this._closeButton = iconButton(CLOSE_ICON, t('Quit application'),
             () => actions.close(this._entry.key));
@@ -682,7 +688,7 @@ export class PanelPins {
     _add(entry) {
         const menus = trayMenus(entry);
         const hasPopup = menus.length > 1 || menus.some(menu => !isExternalMenu(menu));
-        const button = new PanelMenu.Button(0.0, entry.name, !hasPopup);
+        const button = new PanelMenu.Button(0.5, entry.name, !hasPopup);
         // Legacy X11 visuals can include an opaque background supplied by the tray host.
         const legacy = entry.indicators.length || entry.app?.get_icon() ? null : entry.legacy[0]?.icon;
         if (legacy) {

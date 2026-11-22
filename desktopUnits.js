@@ -2,7 +2,7 @@
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 
-import {callSession} from './processActions.js';
+import {callSession, processAppUnits, processIdentity} from './processActions.js';
 
 const BUS_NAME = 'org.freedesktop.systemd1';
 const MANAGER = 'org.freedesktop.systemd1.Manager';
@@ -49,8 +49,12 @@ export function lookupUnitApp(appSystem, unit) {
 }
 
 export class DesktopUnits {
-    constructor(cancellable, onChanged) {
+    constructor(appSystem, cancellable, onChanged) {
         this.names = [];
+        this.background = new Map();
+        this._appSystem = appSystem;
+        this._open = new Map();
+        this._closed = new Map();
         this._cancellable = cancellable;
         this._onChanged = onChanged;
         this._owner = null;
@@ -61,23 +65,79 @@ export class DesktopUnits {
             () => this._disconnect());
     }
 
+    trackWindows() {
+        const now = GLib.get_monotonic_time();
+        const open = new Map();
+        for (const app of this._appSystem.get_running()) {
+            if (!app.get_app_info())
+                continue;
+            const pids = new Set(app.get_windows().filter(window => !window.is_skip_taskbar())
+                .map(window => window.get_pid()));
+            if (!pids.size)
+                continue;
+
+            const id = app.get_id();
+            const previous = this._open.get(id);
+            open.set(id, new Map([...pids].map(pid => [pid, previous?.get(pid) ?? processIdentity(pid)])));
+            this._closed.delete(id);
+        }
+        for (const [id, processes] of this._open) {
+            if (!open.has(id))
+                this._closed.set(id, {processes, closedAt: now});
+        }
+        this._open = open;
+        for (const [unit, id] of this.background) {
+            if (open.has(id))
+                this.background.delete(unit);
+        }
+    }
+
+    _updateRunning(names, pollStartedAt) {
+        const background = new Map();
+        for (const [id, {processes, closedAt}] of this._closed) {
+            // A process can still be shutting down just after its last window closes.
+            if (pollStartedAt - closedAt < GLib.USEC_PER_SEC)
+                continue;
+            for (const [pid, process] of processes) {
+                if (!process || processIdentity(pid)?.started !== process.started) {
+                    processes.delete(pid);
+                    continue;
+                }
+                if ([...this._open.values()].some(windows => windows.has(pid)))
+                    continue;
+                for (const unit of processAppUnits(pid)) {
+                    if (names.includes(unit) && lookupUnitApp(this._appSystem, unit)?.get_id() === id)
+                        background.set(unit, id);
+                }
+            }
+            if (!processes.size)
+                this._closed.delete(id);
+        }
+        const changed = names.join('\n') !== this.names.join('\n') ||
+            background.size !== this.background.size ||
+            [...background].some(([unit, id]) => this.background.get(unit) !== id);
+        this.names = names;
+        this.background = background;
+        if (changed)
+            this._onChanged();
+    }
+
     refresh() {
         const owner = this._owner;
         if (!owner || this._requestOwner === owner)
             return;
 
         this._requestOwner = owner;
+        const pollStartedAt = GLib.get_monotonic_time();
         callSession(owner, PATH, MANAGER, 'ListUnitsByPatterns',
             new GLib.Variant('(asas)', [['active', 'reloading'], ['app-*.service', 'app-*.scope']]),
             '(a(ssssssouso))', this._cancellable).then(result => {
             if (this._owner !== owner)
                 return;
             const [units] = result.deep_unpack();
-            const names = units.map(unit => unit[0]).sort();
-            if (names.join('\n') !== this.names.join('\n')) {
-                this.names = names;
-                this._onChanged();
-            }
+            const names = units.filter(unit => unit[4] === 'running' || unit[3] === 'reloading')
+                .map(unit => unit[0]).sort();
+            this._updateRunning(names, pollStartedAt);
         }).catch(error => {
             if (this._owner === owner &&
                 error.matches?.(Gio.DBusError, Gio.DBusError.UNKNOWN_METHOD))
@@ -118,6 +178,7 @@ export class DesktopUnits {
         }
         if (this.names.length) {
             this.names = [];
+            this.background.clear();
             this._onChanged();
         }
     }

@@ -44,7 +44,7 @@ class BackgroundAppsController {
         };
         this._menu = new BackgroundMenu(toggle, actions, t);
         this._panelPins = new PanelPins(t, actions);
-        this._units = new DesktopUnits(this._cancellable, () => this._queueRefresh());
+        this._units = new DesktopUnits(this._appSystem, this._cancellable, () => this._queueRefresh());
         this._tray = new TrayHost(extension, this._cancellable, () => this._queueRefresh());
 
         this._originalSync = toggle._sync;
@@ -54,11 +54,14 @@ class BackgroundAppsController {
         toggle._sync = this._onSync;
         toggle._syncVisibility = this._onVisibility;
 
+        const windowsChanged = () => {
+            this._units.trackWindows();
+            this._queueRefresh();
+        };
         this._connect(this._settings, `changed::${PIN_KEY}`, () => this._queueRefresh());
-        this._connect(this._appSystem, 'app-state-changed', () => this._queueRefresh());
+        this._connect(this._appSystem, 'app-state-changed', windowsChanged);
         this._connect(this._appSystem, 'installed-changed', () => this._queueRefresh());
-        this._connect(this._tracker, 'tracked-windows-changed', () => this._queueRefresh());
-        this._connect(global.window_manager, 'minimize', () => this._queueRefresh());
+        this._connect(this._tracker, 'tracked-windows-changed', windowsChanged);
         this._connect(toggle, 'destroy', () => this._cancellable.cancel());
         this._connect(toggle.menu, 'open-state-changed', (_menu, open) => {
             if (open) {
@@ -66,6 +69,7 @@ class BackgroundAppsController {
                 this._queueRefresh();
             }
         });
+        this._units.trackWindows();
         this._sync();
     }
 
@@ -91,7 +95,7 @@ class BackgroundAppsController {
         this._entries = collectApplications({
             appSystem: this._appSystem, tracker: this._tracker, monitorApps,
             tray: this._tray, units: this._units, pins: savedPins,
-            unknownName: this._extension.gettext('Application'), previousEntries: this._entries,
+            unknownName: this._extension.gettext('Application'),
         });
         const pins = resolvePins(this._entries, savedPins);
         if (pins.length !== savedPins.length || pins.some((pin, i) => pin !== savedPins[i]))

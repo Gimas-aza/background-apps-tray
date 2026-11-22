@@ -12,11 +12,12 @@ function assert(condition, message) {
 }
 
 let windows = [];
-function desktopApp(id, flatpakId = null) {
+function desktopApp(id, flatpakId = null, executable = id.replace(/\.desktop$/, '')) {
     return {
         get_id: () => id,
         get_name: () => id,
-        get_app_info: () => ({get_string: () => flatpakId, list_actions: () => []}),
+        get_app_info: () => ({get_id: () => id, get_executable: () => executable,
+            get_string: () => flatpakId, list_actions: () => []}),
         get_windows: () => windows,
     };
 }
@@ -26,11 +27,12 @@ const happ = desktopApp('Happ.desktop');
 const appSystem = {
     lookup_app: id => [happ, telegram].find(app => app.get_id() === id) ?? null,
     lookup_startup_wmclass: id => id === 'TelegramDesktop' ? telegram : null,
-    get_running: () => [],
+    get_installed: () => [happ, telegram].map(app => app.get_app_info()),
+    get_running: () => windows.length ? [happ] : [],
 };
 const sources = {
     appSystem, tracker: {get_app_from_pid: () => null}, pins: [], unknownName: '?',
-    tray: {indicators: new Map(), legacy: new Map()}, units: {names: []}, monitorApps: [],
+    tray: {indicators: new Map(), legacy: new Map()}, units: {names: [], background: new Map()}, monitorApps: [],
 };
 
 const unit = 'app-flatpak-org.telegram.desktop-4059249839.scope';
@@ -38,9 +40,10 @@ const indicator = {
     id: 'TelegramDesktop', isReady: true, hasNameOwner: true, owner: ':1.80', menuPath: '/MenuBar',
 };
 const telegramSources = {
-    ...sources, units: {names: [unit]},
+    ...sources, units: {...sources.units, names: [unit]},
     monitorApps: [{app_id: new GLib.Variant('s', 'org.telegram.desktop')}],
-    tray: {indicators: new Map([[indicator, {indicator, pid: null, process: null}]]), legacy: new Map()},
+    tray: {indicators: new Map([[indicator, {indicator, owner: indicator.owner, pid: null, process: null}]]),
+        legacy: new Map()},
 };
 assert(lookupUnitApp(appSystem, unit) === telegram, 'Flatpak unit resolves the double suffix');
 assert(lookupUnitApp(appSystem, 'app-Happ.scope') === happ &&
@@ -56,24 +59,85 @@ const pins = resolvePins(entries, ['sni:TelegramDesktop', 'desktop:org.telegram.
 assert(pins.join() === [entry.key, 'sni:offline'].join(), 'Merge old pins and retain offline pins');
 
 const happUnit = 'app-gnome-Happ-21452.scope';
-const happSources = {...sources, units: {names: [happUnit]}};
+const desktopUnits = new DesktopUnits(appSystem, new Gio.Cancellable(), () => {});
+const happSources = {...sources, units: desktopUnits};
 const key = 'desktop:Happ.desktop';
-const background = collectApplications(happSources);
-const fallback = trayMenus(background.get(key));
-assert(background.get(key).inBackground && fallback[0].type === 'desktop' && fallback[0].canQuit,
-    'Happ without an exported menu still has application actions');
-windows = [{minimized: false, is_skip_taskbar: () => false}];
-const foreground = collectApplications({...happSources, previousEntries: background});
-assert(foreground.get(key).inBackground, 'Opening a window keeps the same running app listed');
-assert(!collectApplications(happSources).get(key).inBackground, 'Ordinary foreground apps stay out');
-assert(collectApplications({...happSources, pins: [key]}).get(key).inBackground, 'Pinned app with a window');
-const restarted = collectApplications({...happSources, units: {names: ['app-gnome-Happ-42.scope']},
-    previousEntries: foreground});
-assert(!restarted.get(key).inBackground, 'A new foreground instance does not inherit the old row');
-windows[0].minimized = true;
-assert(collectApplications(happSources).get(key).inBackground, 'Minimized window counts as background');
+const poll = (startedAt = GLib.get_monotonic_time()) => desktopUnits._updateRunning([happUnit], startedAt);
+const listed = () => collectApplications(happSources).get(key).inBackground;
+const process = Gio.Subprocess.new(['cat'], Gio.SubprocessFlags.STDIN_PIPE);
+const pid = Number(process.get_identifier());
+const readFile = GLib.file_get_contents;
+// The child is real. Its desktop cgroup is simulated so the test also runs outside systemd.
+GLib.file_get_contents = path => path === `/proc/${pid}/cgroup`
+    ? [true, new TextEncoder().encode(`0::/app.slice/${happUnit}\n`)] : readFile(path);
+let fallback;
+try {
+    poll();
+    assert(!listed(), 'A new launch scope alone never creates a background row');
+    const window = {minimized: false, is_skip_taskbar: () => false, get_pid: () => pid};
+    windows = [window, window];
+    desktopUnits.trackWindows();
+    assert(!listed(), 'An ordinary open window stays out');
+    assert(collectApplications({...happSources, pins: [key]}).get(key).inBackground, 'Pinned app with a window');
+    windows = [window];
+    window.minimized = true;
+    desktopUnits.trackWindows();
+    const beforeClose = GLib.get_monotonic_time();
+    poll();
+    assert(!listed(), 'A remaining minimized window still counts as an open window');
+    windows = [];
+    desktopUnits.trackWindows();
+    poll(beforeClose);
+    assert(!listed(), 'A poll started before the last window closed cannot confirm survival');
+    const closedAt = desktopUnits._closed.get(happ.get_id()).closedAt;
+    poll(closedAt);
+    assert(!listed(), 'A process still shutting down does not immediately appear');
+    const afterClose = closedAt + GLib.USEC_PER_SEC;
+    poll(afterClose);
+    const background = collectApplications(happSources).get(key);
+    fallback = trayMenus(background);
+    assert(background.inBackground && fallback[0].type === 'desktop' && fallback[0].canQuit,
+        'A surviving window process in its own live scope has desktop actions');
+    const beforeReopen = GLib.get_monotonic_time();
+    windows = [window];
+    desktopUnits.trackWindows();
+    assert(!listed(), 'Reopening a window clears the windowless fallback immediately');
+    windows = [];
+    desktopUnits.trackWindows();
+    poll(beforeReopen);
+    assert(!listed(), 'A second close cannot reuse a poll from the first close');
+    process.get_stdin_pipe().close(null);
+    await process.wait_check_async(null);
+    poll(desktopUnits._closed.get(happ.get_id()).closedAt + GLib.USEC_PER_SEC);
+    assert(!listed(), 'An exited window process stays out even if its scope still has helpers');
+} finally {
+    GLib.file_get_contents = readFile;
+    process.get_stdin_pipe().close(null);
+    desktopUnits.destroy();
+}
+
+const generic = {...indicator, id: 'status_icon_1', title: '', status: 'Active'};
+const trayRecord = {indicator: generic, owner: null, pid: null, process: null, executable: ''};
+const launch = {...sources, units: {...sources.units, names: [happUnit]}, pins: [key],
+    tray: {indicators: new Map([[generic, trayRecord]]), legacy: new Map()}};
+const visible = input => [...collectApplications(input).values()].filter(row => row.inBackground);
+assert(visible(launch).length === 1 && !visible(launch)[0].indicators.length,
+    'A tray icon waiting for its owner PID does not create a provisional row');
+Object.assign(trayRecord, {owner: generic.owner, executable: 'hApP'});
+const [resolved, extra] = visible(launch);
+assert(!extra && resolved.app === happ && resolved.indicators[0].indicator === generic &&
+    resolvePins(new Map([[key, resolved]]), ['sni:status_icon_1'])[0] === key,
+    'A generic indicator joins its desktop row before the first tracked window, retaining its menu and pin');
+const shared = desktopApp('another.desktop', null, 'Happ');
+const ambiguous = {...appSystem, get_installed: () => [...appSystem.get_installed(), shared.get_app_info()]};
+const standalone = visible({...launch, appSystem: ambiguous, pins: []});
+assert(standalone.length === 1 && !standalone[0].app, 'A shared executable cannot identify a desktop app');
+trayRecord.executable = '';
+assert(visible({...launch, pins: []})[0]?.key === 'sni:status_icon_1', 'A tray-only app survives failed PID lookup');
+generic.status = 'Passive';
+assert(!visible({...launch, pins: []}).length, 'A passive indicator and launch scope alone stay out');
 const legacyIcon = {pid: 0, wm_class: 'Happ'};
-const menus = trayMenus({...background.get(key), legacy: [{icon: legacyIcon}]});
+const menus = trayMenus({...resolved, indicators: [], legacy: [{icon: legacyIcon}]});
 assert(menus.length === 1 && menus[0].type === 'xembed' && !sameTrayMenus(fallback, menus),
     'A real tray menu replaces the fallback');
 
