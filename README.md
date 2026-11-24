@@ -42,7 +42,23 @@ Some apps keep running after their windows close. Background Apps Tray brings th
 
 ## Install
 
-Build the extension from a clone of this repository. You need `zip`, `msgfmt`, and `glib-compile-schemas` installed.
+Download `background-apps-tray@local.shell-extension.zip` from the [latest release](https://github.com/Gimas-aza/background-apps-tray/releases/latest), then run the following command in the download directory:
+
+```sh
+gnome-extensions install ./background-apps-tray@local.shell-extension.zip
+```
+
+Log out and back into GNOME, then enable the extension:
+
+```sh
+gnome-extensions enable background-apps-tray@local
+```
+
+Start an app with its tray icon enabled, then open **Quick Settings → Background Apps**.
+
+### Build from source
+
+You need `zip`, `msgfmt`, and `glib-compile-schemas` installed.
 
 ```sh
 git clone https://github.com/Gimas-aza/background-apps-tray.git
@@ -57,13 +73,7 @@ zip -r ../background-apps-tray@local.shell-extension.zip \
 gnome-extensions install ../background-apps-tray@local.shell-extension.zip
 ```
 
-Log out and back into GNOME, then enable the extension:
-
-```sh
-gnome-extensions enable background-apps-tray@local
-```
-
-Start an app with its tray icon enabled, then open **Quick Settings → Background Apps**.
+After installation, log out and back in, then enable the extension as shown above.
 
 ## How to use it
 
