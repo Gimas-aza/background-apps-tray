@@ -12,7 +12,7 @@ Bring tray menus, panel icons, and app controls into GNOME's Quick Settings.
 ![Linux](https://img.shields.io/badge/Platform-Linux-FCC624?logo=linux&logoColor=black)
 ![License GPL-2.0 or later](https://img.shields.io/badge/License-GPL--2.0%2B-blue)
 
-<img src="screenshots/background-apps.png" alt="Background Apps in GNOME Quick Settings, showing five applications and their controls" width="420">
+<img src="screenshots/social-preview.jpg" alt="Background Apps Tray logo and GNOME Quick Settings preview" width="760">
 
 **See what's running. Open its menu. Pin it to your panel.**
 
