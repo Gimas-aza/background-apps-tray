@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="screenshots/logo.png" alt="Background Apps Tray logo" width="240">
+
 # Background Apps Tray
 
 ### Your background apps, right where you need them.
