@@ -1,55 +1,98 @@
+<div align="center">
+
 # Background Apps Tray
 
-Расширение для GNOME Shell 45–51. Оно добавляет управление значками трея прямо в штатный раздел **Быстрые настройки → Фоновые приложения**.
+### Your background apps, right where you need them.
 
-| Значок в строке | Действие |
-| --- | --- |
-| Список | Открывает меню трея приложения. Например, Unity Hub может показывать недавние проекты, Help and support и Quit Unity Hub. Если приложение не предоставило меню трея, расширение показывает открытие приложения, действия из его desktop-файла и доступную команду выхода. |
-| Булавка | Закрепляет значок на верхней панели. Повторное нажатие открепляет его. Выбор сохраняется для следующего запуска приложения и следующего входа в GNOME. |
-| Крестик | Просит приложение завершиться или останавливает связанный процесс или пользовательскую группу процессов. |
+Bring tray menus, panel icons, and app controls into GNOME's Quick Settings.
 
-Нажатие на закреплённый значок открывает то же меню трея. Название приложения в списке открывает само приложение, когда Shell знает его desktop-файл.
+![GNOME Shell 45–51](https://img.shields.io/badge/GNOME_Shell-45%E2%80%9351-4A86CF?logo=gnome&logoColor=white)
+![Linux](https://img.shields.io/badge/Platform-Linux-FCC624?logo=linux&logoColor=black)
+![License GPL-2.0 or later](https://img.shields.io/badge/License-GPL--2.0%2B-blue)
 
-## Установка
+<img src="screenshots/background-apps.png" alt="Background Apps in GNOME Quick Settings, showing five applications and their controls" width="420">
 
-1. Проверьте версию командой `gnome-shell --version`.
-2. Если включено **AppIndicator and KStatusNotifierItem Support** или **Ubuntu AppIndicators**, отключите его в приложении «Расширения». Оба расширения используют один и тот же StatusNotifierWatcher.
-3. Откройте терминал в каталоге с архивом и выполните:
+**See what's running. Open its menu. Pin it to your panel.**
 
-   ```sh
-   gnome-extensions install ./background-apps-tray@local.shell-extension.zip
-   ```
+</div>
 
-4. Выйдите из сеанса GNOME и войдите снова. Затем включите расширение:
+## Make background apps feel at home in GNOME
 
-   ```sh
-   gnome-extensions enable background-apps-tray@local
-   ```
+Some apps keep running after their windows close. Background Apps Tray brings their controls into GNOME's existing **Quick Settings → Background Apps** section, so you can find and manage them without hunting for a window.
 
-5. Запустите приложение с включённым значком в трее и откройте **Фоновые приложения** в быстрых настройках.
+- **Open app menus** directly from the background apps list or a pinned panel icon.
+- **Pin your favorites** to the top panel. Pins are remembered across app launches and GNOME sessions.
+- **Quit background apps** from the same place when a quit action is available.
+- **Make the panel yours** with custom images and monochrome icons, globally or per app.
+- **Keep GNOME's look and feel** by using its built-in Background Apps section.
 
-## Настройка значков
+<table>
+  <tr>
+    <td align="center"><img src="screenshots/pinned-icons.png" alt="Background apps pinned to the GNOME top panel" width="400"><br><strong>Pin apps to the panel</strong></td>
+    <td align="center"><img src="screenshots/app-menu.png" alt="An application's tray menu open in GNOME Quick Settings" width="400"><br><strong>Use application menus</strong></td>
+  </tr>
+</table>
 
-Откройте настройки Background Apps Tray в приложении «Расширения» или командой `gnome-extensions prefs background-apps-tray@local`. В строке закреплённого приложения можно выбрать файл изображения, вернуть стандартный значок и включить монохромный режим. Общая галочка применяет монохромный режим ко всем закреплённым значкам. Настройки действуют только на значки, закреплённые расширением на верхней панели. Файл выбранного изображения должен оставаться по тому же пути.
+## Requirements
 
-## Какие приложения отображаются
+- Linux with **GNOME Shell 45–51**. Check your version with `gnome-shell --version`.
+- Disable **AppIndicator and KStatusNotifierItem Support** or **Ubuntu AppIndicators** if enabled. They use the same StatusNotifierWatcher as this extension.
 
-В списке отображаются приложения из фонового портала GNOME, активные значки AppIndicator / KStatusNotifierItem и значки XEmbed при доступном X11 или XWayland. Закреплённое приложение также отображается, пока оно запущено.
+## Install
 
-Приложение без значка и записи портала появится, если спустя хотя бы секунду после закрытия последнего обычного окна опрос systemd подтвердит, что процесс окна продолжает работать в группе приложения. Опрос выполняется каждые четыре секунды и при открытии меню. Свёрнутое окно считается открытым. При повторном открытии окна такая строка исчезает. Для этого способа распознавания расширение должно увидеть хотя бы одно окно приложения.
-
-Кнопка списка доступна, когда есть меню трея или известен desktop-файл приложения. По левому или правому щелчку расширение сразу запрашивает меню XEmbed у нижнего края кнопки. При щелчке снаружи распознанного меню и его подменю расширение запрашивает закрытие. Само приложение рисует окно XEmbed и отвечает за его положение и закрытие. Крестик доступен, когда расширение может определить способ завершения приложения. SIGTERM отправляется только одному процессу текущего пользователя после повторной проверки его PID и времени запуска.
-
-## Исходный код
-
-`extension.js` подключает штатный раздел, `menuView.js` содержит кнопки, меню и значки панели, `applications.js` объединяет источники. В `vendor/` находится адаптированный код [AppIndicator and KStatusNotifierItem Support v66](https://github.com/ubuntu/gnome-shell-extension-appindicator/tree/v66) под GNU GPL 2.0 или новее. Авторы и текст лицензии включены в архив.
-
-Для сборки из распакованного архива установите `zip`, `msgfmt` и `glib-compile-schemas`, а затем выполните из каталога с `metadata.json`:
+Build the extension from a clone of this repository. You need `zip`, `msgfmt`, and `glib-compile-schemas` installed.
 
 ```sh
+git clone https://github.com/Gimas-aza/background-apps-tray.git
+cd background-apps-tray
+
 glib-compile-schemas --strict schemas
 mkdir -p locale/ru/LC_MESSAGES
 msgfmt --check -o locale/ru/LC_MESSAGES/background-apps-tray.mo po/ru.po
 zip -r ../background-apps-tray@local.shell-extension.zip \
     metadata.json *.js stylesheet.css icons schemas locale po vendor README.md AUTHORS.md LICENSE
+
+gnome-extensions install ../background-apps-tray@local.shell-extension.zip
 ```
+
+Log out and back into GNOME, then enable the extension:
+
+```sh
+gnome-extensions enable background-apps-tray@local
+```
+
+Start an app with its tray icon enabled, then open **Quick Settings → Background Apps**.
+
+## How to use it
+
+Each app can have up to three controls:
+
+| Control | Action |
+| --- | --- |
+| **List** | Open the app's tray menu. If it does not provide one, the extension can show actions from its desktop file and an available quit command. |
+| **Pin** | Add or remove its icon on the top panel. Clicking the pinned icon opens the same app menu. |
+| **×** | Ask the app to quit, or stop its associated process or user process group. |
+
+Click an app's name to open it when GNOME knows its desktop file. Controls appear only when the corresponding action is available.
+
+## Customize panel icons
+
+Open **Background Apps Tray** in the Extensions app, or run:
+
+```sh
+gnome-extensions prefs background-apps-tray@local
+```
+
+Choose a custom image, restore the default icon, or make an individual icon monochrome. You can also make all pinned icons monochrome. These settings apply only to icons pinned by this extension; custom image files must remain at their original paths.
+
+## Which apps appear?
+
+The list includes apps reported by GNOME's background portal, active AppIndicator / KStatusNotifierItem icons, and XEmbed icons when X11 or XWayland is available. Pinned apps also appear while running.
+
+Apps without a tray icon or portal entry can be detected through systemd after their last normal window closes. The extension must have seen at least one window from the app; minimized windows count as open. Detection runs every four seconds and when the menu opens. The entry disappears when a window reopens.
+
+XEmbed apps draw their own menus and control their position and closing behavior. The extension requests the menu at the bottom of the button and requests that it close when clicking outside the recognized menu and its submenus. When a process must be stopped with SIGTERM, the extension checks its PID and start time again and signals only one process owned by the current user.
+
+## Credits and license
+
+This project includes adapted code from [AppIndicator and KStatusNotifierItem Support v66](https://github.com/ubuntu/gnome-shell-extension-appindicator/tree/v66). See [AUTHORS.md](AUTHORS.md) for attribution and [LICENSE](LICENSE) for the GNU General Public License, version 2 or later.
